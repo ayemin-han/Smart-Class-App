@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class QRScannerScreen extends StatefulWidget {
   final Function(String) onScan;
@@ -21,10 +22,28 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     super.initState();
     _isSupported = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS);
+            defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux);
 
     if (_isSupported) {
+      _requestCameraPermission();
+    }
+  }
+
+  Future<void> _requestCameraPermission() async {
+    final status = await Permission.camera.request();
+    if (status.isGranted) {
       _cameraController = MobileScannerController();
+      setState(() {});
+    } else {
+      // Handle denied permission
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Camera permission is required for QR scanning')),
+        );
+      }
     }
   }
 
@@ -35,10 +54,13 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
   }
 
   void _handleDetection(BarcodeCapture capture) {
+    print('QR Detection triggered: ${capture.barcodes.length} barcodes');
     if (!_isScanning) return;
 
     final barcode = capture.barcodes.isNotEmpty ? capture.barcodes.first : null;
     final String? code = barcode?.rawValue;
+
+    print('Scanned code: $code');
 
     if (code != null && code.isNotEmpty) {
       setState(() {
@@ -73,15 +95,38 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                 Icon(Icons.qr_code_scanner, size: 64, color: Colors.grey[600]),
                 SizedBox(height: 16),
                 Text(
-                  'QR scanning is only available on Android and iOS devices.',
+                  kIsWeb
+                      ? 'On web, please enter the QR code manually:'
+                      : 'QR scanning requires a camera and is not supported on this platform.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 16),
                 ),
-                SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text('Go Back'),
-                ),
+                if (kIsWeb) ...[
+                  SizedBox(height: 16),
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: 'Enter QR Code',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (value) {
+                      if (value.isNotEmpty) {
+                        widget.onScan(value);
+                        Navigator.of(context).pop();
+                      }
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text('Cancel'),
+                  ),
+                ] else ...[
+                  SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text('Go Back'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -107,12 +152,18 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
             },
           ),
           IconButton(
+            icon: Icon(Icons.flashlight_on),
+            onPressed: () => _cameraController?.toggleTorch(),
+          ),
+          IconButton(
             icon: Icon(Icons.flip_camera_ios),
             onPressed: () => _cameraController?.switchCamera(),
           ),
         ],
       ),
-      body: Stack(
+      body: _cameraController == null
+          ? Center(child: CircularProgressIndicator())
+          : Stack(
         children: [
           MobileScanner(
             controller: _cameraController!,
@@ -150,7 +201,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
               color: Colors.black54,
               padding: EdgeInsets.all(16),
               child: Text(
-                'Point your phone at the QR code. The scan will happen automatically.',
+                'Point your camera at the QR code. The scan will happen automatically.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white),
               ),
